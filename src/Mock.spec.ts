@@ -1,4 +1,4 @@
-import mock, { mockClear, mockDeep, mockReset, mockFn, JestMockExtended } from './Mock';
+import mock, { mockClear, mockDeep, mockReset, mockFn, JestMockExtended, mockPrimitive } from './Mock';
 import { anyNumber } from './Matchers';
 import calledWithFn from './CalledWithFn';
 import { MockProxy } from './Mock';
@@ -300,6 +300,24 @@ describe('jest-mock-extended', () => {
             mockObj.deepProp.getAnotherString.calledWith('abc').mockReturnValue('this string');
             expect(mockObj.deepProp.getAnotherString('abc')).toBe('this string');
         });
+
+        test('Can provide mock primitive to mock implementation', () => {
+            const mockObj = mock<Test1>({
+                id: mockPrimitive<number>().mockReturnValue(0)
+            });
+
+            expect(mockObj.id).toBe(0);
+        });
+
+        test('Can provide mock primitive to mock implementation and change the value of the mock', () => {
+            const mockObj = mock<Test1>({
+                id: mockPrimitive<number>().mockReturnValue(0)
+            });
+
+            mockPrimitive(() => mockObj.id).mockReturnValue(1);
+
+            expect(mockObj.id).toBe(1);
+        });
     });
 
     describe('Promise', () => {
@@ -396,6 +414,30 @@ describe('jest-mock-extended', () => {
             // Does not clear mock implementations of calledWith
             expect(mockObj.deepProp.getNumber(1)).toBe(4);
         });
+
+        test('mockReset primitive', () => {
+            const mockObj = mock<Test1>();
+            mockPrimitive(() => mockObj.id).mockReturnValue(1);
+
+            expect(mockObj.id).toBe(1);
+
+            mockReset(mockObj);
+
+            expect(mockObj.id).toBeUndefined();
+        });
+
+        test('mockClear primitive', () => {
+            const mockObj = mock<Test1>();
+            mockPrimitive(() => mockObj.id).mockReturnValue(1);
+
+            expect(mockObj.id).toBe(1);
+            expect(mockPrimitive(() => mockObj.id).mock.calls.length).toBe(1);
+
+            mockClear(mockObj);
+
+            expect(mockPrimitive(() => mockObj.id).mock.calls.length).toBe(0);
+            expect(mockObj.id).toBe(1);
+        });
     });
 
     describe('function mock', () => {
@@ -421,6 +463,31 @@ describe('jest-mock-extended', () => {
             const mockFunc = mock<{ ignoreMe: string; dontIgnoreMe: string }>();
             expect(mockFunc.ignoreMe).toBeUndefined();
             expect(mockFunc.dontIgnoreMe).toBeDefined();
+        });
+    });
+
+    describe('Primive mock support', () => {
+        test('Can mock a primitive', () => {
+            const mockObj = mock<Test1>();
+            mockPrimitive(() => mockObj.id).mockReturnValue(0);
+
+            expect(mockObj.id).toBe(0);
+        });
+
+        test('Can mock primitive only once', () => {
+            const mockObj = mock<Test1>();
+            mockPrimitive(() => mockObj.id).mockReturnValueOnce(0);
+
+            expect(mockObj.id).toBe(0);
+            expect(mockObj.id).toBeUndefined();
+        });
+
+        test('Can change the value of the mock primitive', () => {
+            const mockObj = mock<Test1>();
+            mockPrimitive(() => mockObj.id).mockReturnValue(0);
+            mockPrimitive(() => mockObj.id).mockReturnValue(1);
+
+            expect(mockObj.id).toBe(1);
         });
     });
 });

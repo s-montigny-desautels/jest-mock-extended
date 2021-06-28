@@ -1,15 +1,15 @@
 import calledWithFn from './CalledWithFn';
 import { MatchersOrLiterals } from './Matchers';
-import { DeepPartial } from 'ts-essentials';
+import { DeepPartial, Primitive } from 'ts-essentials';
 
 type ProxiedProperty = string | number | symbol;
 
 export interface GlobalConfig {
     // ignoreProps is required when we don't want to return anything for a mock (for example, when mocking a promise).
-    ignoreProps?: ProxiedProperty[]
+    ignoreProps?: ProxiedProperty[];
 }
 
-const DEFAULT_CONFIG:  GlobalConfig = {
+const DEFAULT_CONFIG: GlobalConfig = {
     ignoreProps: ['then']
 };
 
@@ -21,7 +21,7 @@ export const JestMockExtended = {
         // Shallow merge so they can override anything they want.
         GLOBAL_CONFIG = { ...DEFAULT_CONFIG, ...config };
     }
-}
+};
 
 export interface CalledWithMock<T, Y extends any[]> extends jest.Mock<T, Y> {
     calledWith: (...args: Y | MatchersOrLiterals<Y>) => jest.Mock<T, Y>;
@@ -30,22 +30,25 @@ export interface CalledWithMock<T, Y extends any[]> extends jest.Mock<T, Y> {
 export type MockProxy<T> = {
     // This supports deep mocks in the else branch
     [K in keyof T]: T[K] extends (...args: infer A) => infer B ? CalledWithMock<B, A> : MockProxy<T[K]>;
-} & T;
+} &
+    T;
 
 export interface MockOpts {
     deep?: boolean;
 }
 
 export const mockClear = (mock: MockProxy<any>) => {
+    _queryMockPrimitive = true;
     for (let key of Object.keys(mock)) {
         if (mock[key]._isMockObject) {
             mockClear(mock[key]);
         }
-
+        console.log(mock[key]);
         if (mock[key]._isMockFunction) {
             mock[key].mockClear();
         }
     }
+    _queryMockPrimitive = false;
 
     // This is a catch for if they pass in a jest.fn()
     if (!mock._isMockObject) {
@@ -53,8 +56,8 @@ export const mockClear = (mock: MockProxy<any>) => {
     }
 };
 
-
 export const mockReset = (mock: MockProxy<any>) => {
+    _queryMockPrimitive = true;
     for (let key of Object.keys(mock)) {
         if (mock[key]._isMockObject) {
             mockReset(mock[key]);
@@ -63,6 +66,7 @@ export const mockReset = (mock: MockProxy<any>) => {
             mock[key].mockReset();
         }
     }
+    _queryMockPrimitive = false;
 
     // This is a catch for if they pass in a jest.fn()
     // Worst case, we will create a jest.fn() (since this is a proxy)
@@ -75,6 +79,8 @@ export const mockReset = (mock: MockProxy<any>) => {
 export const mockDeep = <T>(mockImplementation?: DeepPartial<T>): MockProxy<T> & T => mock(mockImplementation, { deep: true });
 
 const overrideMockImp = (obj: DeepPartial<any>, opts?: MockOpts) => {
+    initMockObject(obj);
+
     const proxy = new Proxy<MockProxy<any>>(obj, handler(opts));
     for (let name of Object.keys(obj)) {
         if (typeof obj[name] === 'object' && obj[name] !== null) {
@@ -87,8 +93,17 @@ const overrideMockImp = (obj: DeepPartial<any>, opts?: MockOpts) => {
     return proxy;
 };
 
+const initMockObject = (obj: DeepPartial<any>) => {
+    obj._isMockObject = true;
+    obj._isMockPrimitive = false;
+};
+
+const isMockPrimitive = (obj: any) => {
+    return !_queryMockPrimitive && !!obj && obj._isMockPrimitive;
+};
+
 const handler = (opts?: MockOpts) => ({
-    ownKeys (target: MockProxy<any>) {
+    ownKeys(target: MockProxy<any>) {
         return Reflect.ownKeys(target);
     },
 
@@ -103,7 +118,6 @@ const handler = (opts?: MockOpts) => ({
 
         // @ts-ignore
         if (!(property in obj)) {
-
             if (GLOBAL_CONFIG.ignoreProps?.includes(property)) {
                 return undefined;
             }
@@ -118,22 +132,46 @@ const handler = (opts?: MockOpts) => ({
             // why deep is opt in.
             if (opts?.deep && property !== 'calls') {
                 // @ts-ignore
+                const fn = calledWithFn();
+                initMockObject(fn);
                 obj[property] = new Proxy<MockProxy<any>>(fn, handler(opts));
-                // @ts-ignore
-                obj[property]._isMockObject = true;
             } else {
                 // @ts-ignore
                 obj[property] = calledWithFn();
             }
         }
+
         // @ts-ignore
-        return obj[property];
+        const value = obj[property];
+
+        if (isMockPrimitive(value)) {
+            return value();
+        }
+        return value;
     }
 });
 
-const mock = <T>(mockImplementation: DeepPartial<T> = {} as DeepPartial<T>, opts?: MockOpts): MockProxy<T> & T => {
+let _queryMockPrimitive = false;
+
+type PrimitiveMock<T> = jest.Mock<T, any> & T;
+export const mockPrimitive = <T extends Primitive>(getter?: () => T): PrimitiveMock<T> => {
+    let primitiveMock: PrimitiveMock<T> | undefined = undefined;
+    if (getter) {
+        _queryMockPrimitive = true;
+        primitiveMock = getter() as PrimitiveMock<T>;
+        _queryMockPrimitive = false;
+    }
+    if (!primitiveMock) {
+        primitiveMock = jest.fn() as PrimitiveMock<T>;
+    }
+
     // @ts-ignore private
-    mockImplementation!._isMockObject = true;
+    primitiveMock._isMockPrimitive = true;
+
+    return primitiveMock;
+};
+
+const mock = <T>(mockImplementation: DeepPartial<T> = {} as DeepPartial<T>, opts?: MockOpts): MockProxy<T> & T => {
     return overrideMockImp(mockImplementation, opts);
 };
 
@@ -141,7 +179,7 @@ export const mockFn = <
     T extends Function,
     A extends any[] = T extends (...args: infer AReal) => any ? AReal : any[],
     R = T extends (...args: any) => infer RReal ? RReal : any
-    >(): CalledWithMock<R, A> & T => {
+>(): CalledWithMock<R, A> & T => {
     // @ts-ignore
     return calledWithFn();
 };
